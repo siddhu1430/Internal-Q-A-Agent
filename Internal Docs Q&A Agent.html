@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enhanced Internal Docs Q&A Agent</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+            min-height: 100vh;
+        }
+        .chat-message {
+            max-width: 85%;
+            padding: 0.75rem 1rem;
+            border-radius: 1.5rem;
+            margin-bottom: 0.5rem;
+            word-wrap: break-word;
+            white-space: pre-wrap;
+            transition: all 0.3s ease-in-out;
+        }
+        .user-message {
+            background-color: #d1e7dd;
+            align-self: flex-end;
+            border-bottom-right-radius: 0.25rem;
+            animation: slideInRight 0.3s forwards;
+        }
+        .assistant-message {
+            background-color: #e9ecef;
+            align-self: flex-start;
+            border-bottom-left-radius: 0.25rem;
+            animation: slideInLeft 0.3s forwards;
+        }
+        .loading-dots:after {
+            content: ' .';
+            animation: dots 1s steps(5, end) infinite;
+        }
+        @keyframes dots {
+            0%, 20% {
+                color: rgba(0,0,0,0);
+                text-shadow:
+                    .25em 0 0 rgba(0,0,0,0),
+                    .5em 0 0 rgba(0,0,0,0);
+            }
+            40% {
+                color: #555;
+                text-shadow:
+                    .25em 0 0 rgba(0,0,0,0),
+                    .5em 0 0 rgba(0,0,0,0);
+            }
+            60% {
+                text-shadow:
+                    .25em 0 0 #555,
+                    .5em 0 0 rgba(0,0,0,0);
+            }
+            80%, 100% {
+                text-shadow:
+                    .25em 0 0 #555,
+                    .5em 0 0 #555;
+            }
+        }
+        @keyframes slideInLeft {
+            from { transform: translateX(-20px); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        @keyframes slideInRight {
+            from { transform: translateX(20px); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        .animate-fadeIn {
+            animation: fadeIn 0.5s ease-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        .suggestion-item {
+            cursor: pointer;
+            padding: 0.75rem;
+            background-color: #e2e8f0;
+            border-radius: 0.5rem;
+            transition: all 0.2s ease-in-out;
+        }
+        .suggestion-item:hover {
+            background-color: #cbd5e1;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        /* --- Live Background Gradient & Circles --- */
+        #background-animation {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(-45deg, #4169e1, #a164a6, #dc349b);
+            background-size: 400% 400%;
+            animation: gradient-animation 15s ease infinite;
+            z-index: -1;
+        }
+        @keyframes gradient-animation {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+        .circle {
+            position: absolute;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 50%;
+            animation: float-animation 20s infinite ease-in-out;
+            opacity: 0.5;
+            will-change: transform;
+        }
+        @keyframes float-animation {
+            0%, 100% { transform: translateY(0) translateX(0); }
+            25% { transform: translateY(-20vh) translateX(20vw); }
+            50% { transform: translateY(0) translateX(40vw); }
+            75% { transform: translateY(20vh) translateX(60vw); }
+        }
+        
+        /* --- Glass Effect for Main Container --- */
+        .glass-effect {
+            background: rgba(255, 255, 255, 0.2);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+
+        /* --- Ensure chat and content are readable over the glass effect --- */
+        .background-opacity {
+            background-color: rgba(255, 255, 255, 0.75);
+            backdrop-filter: blur(5px);
+        }
+    </style>
+</head>
+<body class="bg-gray-100 flex flex-col items-center justify-center min-h-screen p-4">
+
+    <!-- Live Animated Background -->
+    <div id="background-animation"></div>
+
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, getDocs, onSnapshot, query, orderBy, where, deleteDoc, doc, writeBatch } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Global variables for Firebase services
+        window.firebase = {
+            initializeApp,
+            getAuth,
+            signInAnonymously,
+            signInWithCustomToken,
+            onAuthStateChanged,
+            getFirestore,
+            collection,
+            addDoc,
+            getDocs,
+            onSnapshot,
+            query,
+            orderBy,
+            where,
+            deleteDoc,
+            doc,
+            writeBatch
+        };
+    </script>
+
+    <!-- Main Container -->
+    <div class="glass-effect rounded-2xl shadow-xl w-full max-w-5xl p-8 space-y-8 animate-fadeIn relative z-10">
+        <h1 class="text-3xl font-bold text-center text-white">Internal Docs Q&A Agent</h1>
+        <p class="text-center text-white/80">
+            This project showcases a Retrieval-Augmented Generation (RAG) system with persistent chat history.
+            Feel free to ask questions related to company policies on **travel, remote work, or IT support**.
+        </p>
+
+        <!-- Status Message Box -->
+        <div id="message-box" class="hidden px-4 py-3 rounded-xl relative transition-all" role="alert">
+            <span class="block sm:inline" id="message-text"></span>
+        </div>
+
+        <!-- Document Upload Section -->
+        <div class="flex flex-col sm:flex-row space-y-4 sm:space-y-0 sm:space-x-4 items-center">
+            <div class="flex-1 flex items-center space-x-2 w-full">
+                <label for="file-upload" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold py-2 px-4 rounded-lg cursor-pointer transition-all flex items-center justify-center">
+                    Upload Docs (.txt)
+                </label>
+                <input type="file" id="file-upload" class="hidden" accept=".txt">
+                <span id="file-name" class="flex-1 text-sm text-gray-800/80 truncate">No file selected.</span>
+            </div>
+            <button id="clear-all-docs-button" class="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg shadow-sm transition-all w-full sm:w-auto">Clear All Docs</button>
+        </div>
+
+        <!-- Main Content Area -->
+        <div class="flex flex-col md:flex-row space-y-8 md:space-y-0 md:space-x-8">
+
+            <!-- Chatbot Section -->
+            <div class="flex flex-col space-y-4 md:w-2/3">
+                <h2 class="text-xl font-semibold text-white/90">1. Ask Your Questions</h2>
+                
+                <!-- Controls and Settings -->
+                <div class="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-4 mb-4">
+                    <div class="flex-1 flex items-center space-x-2">
+                        <label for="ai-model-select" class="text-white/80">AI Model:</label>
+                        <select id="ai-model-select" class="flex-1 p-2 border border-gray-300 rounded-lg">
+                            <option value="gemini-1.5-pro-latest">Gemini 1.5 Pro</option>
+                            <option value="gemini-2.5-flash-preview-05-20" selected>Gemini 2.5 Flash</option>
+                        </select>
+                    </div>
+                    <button id="clear-chat-button" class="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg shadow-sm transition-all">Clear Chat</button>
+                </div>
+                
+                <div id="chat-history" class="background-opacity p-4 h-96 overflow-y-auto border border-white/20 rounded-lg flex flex-col-reverse">
+                    <div class="space-y-4 flex flex-col-reverse" id="messages-container">
+                        <!-- Chat messages will be appended here -->
+                        <div class="assistant-message">Welcome! Your chat history is loading...</div>
+                    </div>
+                </div>
+                
+                <!-- Chat Input -->
+                <div class="flex space-x-2">
+                    <input type="text" id="user-input" placeholder="Ask a question..." class="flex-1 p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                    <button id="send-button" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg shadow-md transition-all">Send</button>
+                </div>
+            </div>
+
+            <!-- Side Panels -->
+            <div class="flex flex-col space-y-8 md:w-1/3">
+                <!-- Retrieved Context Section -->
+                <div class="flex-1 flex flex-col space-y-4">
+                    <h2 class="text-xl font-semibold text-white/90">2. Retrieved Context</h2>
+                    <div id="retrieved-context" class="background-opacity p-4 h-48 overflow-y-auto border border-white/20 rounded-lg space-y-4">
+                        <p class="text-gray-400 italic">Relevant document chunks will appear here after a question is asked.</p>
+                    </div>
+                </div>
+
+                <!-- Suggestion Box Section -->
+                <div class="flex-1 flex flex-col space-y-4">
+                    <h2 class="text-xl font-semibold text-white/90">3. Suggestion Box</h2>
+                    <div id="suggestion-box" class="background-opacity p-4 h-48 overflow-y-auto border border-white/20 rounded-lg space-y-2">
+                        <p class="text-sm text-gray-500 italic">Click on a suggestion to try it out!</p>
+                        <ul class="space-y-2" id="suggestion-list">
+                            <li class="suggestion-item" data-question="What's the company policy on remote work?">What's the company policy on remote work?</li>
+                            <li class="suggestion-item" data-question="How do I submit an expense report?">How do I submit an expense report?</li>
+                            <li class="suggestion-item" data-question="How can I get a new laptop?">How can I get a new laptop?</li>
+                            <li class="suggestion-item" data-question="Tell me about the health benefits.">Tell me about the health benefits.</li>
+                            <li class="suggestion-item" data-question="Who do I contact for urgent IT help?">Who do I contact for urgent IT help?</li>
+                            <li class="suggestion-item" data-question="How much paid time off do I get?">How much paid time off do I get?</li>
+                            <li class="suggestion-item" data-question="When do I need to read the employee handbook?">When do I need to read the employee handbook?</li>
+                            <li class="suggestion-item" data-question="How much paid time off do I get for sick leave?">How much paid time off do I get for sick leave?</li>
+                            <li class="suggestion-item" data-question="Who approves expense reports?">Who approves expense reports?</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        // Import Firebase functions from the window object
+        const {
+            initializeApp,
+            getAuth,
+            signInAnonymously,
+            signInWithCustomToken,
+            onAuthStateChanged,
+            getFirestore,
+            collection,
+            addDoc,
+            getDocs,
+            onSnapshot,
+            query,
+            orderBy,
+            where,
+            deleteDoc,
+            doc,
+            writeBatch
+        } = window.firebase;
+
+        // Use a function to safely get the app ID and Firebase config from global variables
+        const getGlobalVars = () => {
+            const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+            const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+            const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+            return { appId, firebaseConfig, initialAuthToken };
+        };
+        const { appId, firebaseConfig, initialAuthToken } = getGlobalVars();
+
+        // Constants and state
+        const GEMINI_EMBEDDING_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent";
+        const API_KEY = "AIzaSyAdLzIqbZ--Wf9FMuEivqsTrkSQebgooWA"; // The API key is provided at runtime.
+        const EMBEDDING_MODEL = "models/text-embedding-004";
+        
+        let db, auth, userId;
+        let isAuthReady = false;
+
+        // Pre-loaded document corpus (for a real app, this would be a separate file or database)
+        const DEFAULT_DOCS = [
+            "Company Travel Policy: All business travel must be pre-approved by a direct manager. Employees are eligible for reimbursement of economy-class airfare, reasonable hotel accommodations, and daily meal per diems. Receipts are required for all expenses over $25.",
+            "Remote Work Policy: Our remote work policy allows employees to work from a location outside of the office. Employees must have a stable internet connection and a dedicated workspace. All remote workers must be available during core business hours of 9 AM to 4 PM, local time.",
+            "IT Support Procedures: For all technical issues, please submit a ticket through the IT Support Portal. For urgent issues, you may contact the IT helpdesk at extension 555. Common issues like password resets can be handled by the automated bot on the support portal.",
+            "Leave and Vacation Policy: Full-time employees are granted 15 days of paid time off (PTO) annually. Sick leave is separate and accrues at a rate of 1 day per month. All PTO requests must be submitted at least two weeks in advance through the HR system.",
+            "Hardware and Asset Request: To request a new laptop, monitor, or other hardware, please fill out the 'Hardware Request Form' on the internal wiki. All requests are subject to department budget approval and may take up to 3 weeks to fulfill.",
+            "Expense Reimbursement Process: The process for submitting expense reports is as follows: 1) Collect all receipts for expenses over $25. 2) Fill out the expense report form in our financial system. 3) Submit the report for manager approval. 4) Await payment via direct deposit within 10 business days.",
+            "Employee Handbook Overview: The official employee handbook contains detailed information on company culture, ethics, and conduct. All new hires are required to read and sign a copy of the handbook within their first month of employment.",
+            "Health and Wellness Benefits: The company offers comprehensive health insurance plans. Enrollment details and information on dental and vision benefits can be found on the HR portal. The plan includes mental health services and an optional gym membership subsidy.",
+            // --- New Policies for Top Companies ---
+            "Google Remote Work Policy: Google's domestic remote work policy is hybrid, requiring employees to come into the office three days a week. Attendance is tracked by badges and is a factor in performance reviews. For international remote work, Google offers up to four weeks of work from anywhere per year, which is limited compared to many other tech companies.",
+            "Microsoft Remote Work Policy: As of January 2025, Microsoft requires employees to work from the office at least three days per week. This policy affects employees within a 50-mile radius of the Redmond headquarters. Some teams may have stricter requirements. The policy allows for exceptions, which require management approval.",
+            "Tesla Remote Work Policy: Tesla's CEO, Elon Musk, has stated a strict in-office rule. All employees are required to work a minimum of 40 hours per week in a main Tesla office. Remote work is generally not permitted, and failure to comply may be considered a resignation. Exceptions must be personally approved by Elon Musk.",
+            "Amazon Vacation and Leave Policy: Amazon provides a comprehensive paid time off (PTO) policy. Full-time employees get up to 88 hours of PTO, which includes both personal and vacation time. This accrues each pay period. Paid parental leave is also offered for eligible employees after one year of continuous service. There are separate policies for reduced-time and part-time employees.",
+            "Microsoft Employee Benefits: Microsoft offers competitive salaries, bonuses, and stock awards. The benefits package includes comprehensive health insurance (medical, dental, vision), a 401(k) plan with company matching, and a Perks+ program that reimburses for physical, mental, and financial health expenses. They also provide generous paid leave, childcare support, and educational assistance.",
+            "Google Employee Benefits: Google provides competitive pay, robust health insurance starting on day one, and a generous time-off policy that includes vacation, sick time, and paid parental leave. The company offers a 401(k) retirement plan with pre-tax and Roth options. Perks include free meals, on-site fitness centers, and flexible time, including the option to dedicate 20% of time to passion projects."
+        ];
+        
+        let documentStore = [];
+
+        // DOM elements
+        const messagesContainer = document.getElementById('messages-container');
+        const userInput = document.getElementById('user-input');
+        const sendButton = document.getElementById('send-button');
+        const messageBox = document.getElementById('message-box');
+        const messageText = document.getElementById('message-text');
+        const retrievedContext = document.getElementById('retrieved-context');
+        const aiModelSelect = document.getElementById('ai-model-select');
+        const clearChatButton = document.getElementById('clear-chat-button');
+        const fileUploadInput = document.getElementById('file-upload');
+        const fileNameSpan = document.getElementById('file-name');
+        const clearAllDocsButton = document.getElementById('clear-all-docs-button');
+        const suggestionList = document.getElementById('suggestion-list');
+        const backgroundAnimation = document.getElementById('background-animation');
+        
+        // Function to create and add circles
+        function createCircles() {
+            for (let i = 0; i < 15; i++) {
+                const circle = document.createElement('div');
+                circle.classList.add('circle');
+                const size = Math.random() * 80 + 20; // Size from 20px to 100px
+                circle.style.width = `${size}px`;
+                circle.style.height = `${size}px`;
+                circle.style.left = `${Math.random() * 100}%`;
+                circle.style.top = `${Math.random() * 100}%`;
+                circle.style.animationDuration = `${Math.random() * 20 + 10}s`; // Duration from 10s to 30s
+                circle.style.animationDelay = `${Math.random() * -20}s`; // Negative delay for staggered start
+                backgroundAnimation.appendChild(circle);
+            }
+        }
+        
+        // --- Firebase Initialization and Auth ---
+        window.onload = async () => {
+            createCircles();
+            try {
+                if (firebaseConfig) {
+                    const app = initializeApp(firebaseConfig);
+                    db = getFirestore(app);
+                    auth = getAuth(app);
+
+                    if (initialAuthToken) {
+                        await signInWithCustomToken(auth, initialAuthToken);
+                    } else {
+                        await signInAnonymously(auth);
+                    }
+
+                    onAuthStateChanged(auth, async (user) => {
+                        if (user) {
+                            userId = user.uid;
+                            isAuthReady = true;
+                            await indexDocuments(DEFAULT_DOCS);
+                            listenForChatHistory();
+                        } else {
+                            console.error("User not authenticated.");
+                            showMessage("Error: Could not authenticate user. Chat history will not be saved.", "error");
+                            await indexDocuments(DEFAULT_DOCS);
+                            messagesContainer.innerHTML = '<div class="assistant-message">Welcome! Chat history is unavailable, but you can still ask questions.</div>';
+                        }
+                    });
+                } else {
+                    showMessage("Error: Firebase config not found. Chat history will not be saved.", "error");
+                    // Continue with the app, but without persistence
+                    await indexDocuments(DEFAULT_DOCS);
+                    messagesContainer.innerHTML = '<div class="assistant-message">Welcome! Chat history is unavailable, but you can still ask questions.</div>';
+                }
+            } catch (e) {
+                console.error("Firebase initialization failed:", e);
+                showMessage("An error occurred during app startup. Chat history is unavailable.", "error");
+            }
+        };
+
+        // --- Core App Logic ---
+
+        // Event listeners
+        sendButton.addEventListener('click', askQuestion);
+        userInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                askQuestion();
+            }
+        });
+        clearChatButton.addEventListener('click', clearChatHistory);
+        fileUploadInput.addEventListener('change', handleFileUpload);
+        clearAllDocsButton.addEventListener('click', clearAllDocs);
+        suggestionList.addEventListener('click', (e) => {
+            if (e.target.tagName === 'LI') {
+                userInput.value = e.target.dataset.question;
+                userInput.focus();
+            }
+        });
+
+        // Handles file upload
+        function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (!file) {
+                fileNameSpan.textContent = 'No file selected.';
+                return;
+            }
+            fileNameSpan.textContent = file.name;
+
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                const fileContent = e.target.result;
+                const chunks = fileContent.split(/\n\n+/).filter(chunk => chunk.trim().length > 0);
+                await indexDocuments(chunks);
+            };
+            reader.onerror = () => {
+                showMessage('Error reading file.', 'error');
+            };
+            reader.readAsText(file);
+        }
+
+        // Clears the indexed documents
+        async function clearAllDocs() {
+            documentStore = [];
+            retrievedContext.innerHTML = '<p class="text-gray-400 italic">No documents indexed. Please upload a file to begin.</p>';
+            fileNameSpan.textContent = 'No file selected.';
+            fileUploadInput.value = '';
+            showMessage('All documents cleared. Please upload a new document to begin.', 'success');
+        }
+
+        // Helper function to show a status message
+        function showMessage(text, type = 'info') {
+            messageText.textContent = text;
+            messageBox.className = `block px-4 py-3 rounded-xl relative mb-4 transition-all ${
+                type === 'info' ? 'bg-blue-100 border-blue-400 text-blue-700' :
+                type === 'success' ? 'bg-green-100 border-green-400 text-green-700' :
+                'bg-red-100 border-red-400 text-red-700'
+            }`;
+            messageBox.style.display = 'block';
+        }
+
+        // Displays a message in the chat history
+        function displayMessage(text, sender) {
+            const messageElement = document.createElement('div');
+            messageElement.textContent = text;
+            messageElement.classList.add('chat-message');
+            if (sender === 'user') {
+                messageElement.classList.add('user-message');
+            } else {
+                messageElement.classList.add('assistant-message');
+            }
+            messagesContainer.prepend(messageElement);
+        }
+        
+        // Displays retrieved chunks
+        function displayRetrievedContext(chunks) {
+            retrievedContext.innerHTML = '';
+            chunks.forEach((chunk, index) => {
+                const chunkElement = document.createElement('div');
+                chunkElement.classList.add('bg-gray-200', 'p-3', 'rounded-lg');
+                chunkElement.innerHTML = `<span class="font-bold text-gray-700">Source [${index + 1}]:</span> ${chunk.text}`;
+                retrievedContext.appendChild(chunkElement);
+            });
+        }
+
+        // Cosine similarity function
+        function cosineSimilarity(vecA, vecB) {
+            let dotProduct = 0;
+            let magnitudeA = 0;
+            let magnitudeB = 0;
+            for (let i = 0; i < vecA.length; i++) {
+                dotProduct += vecA[i] * vecB[i];
+                magnitudeA += vecA[i] * vecA[i];
+                magnitudeB += vecB[i] * vecB[i];
+            }
+            magnitudeA = Math.sqrt(magnitudeA);
+            magnitudeB = Math.sqrt(magnitudeB);
+            if (magnitudeA === 0 || magnitudeB === 0) {
+                return 0;
+            }
+            return dotProduct / (magnitudeA * magnitudeB);
+        }
+        
+        // Function to call the Gemini API with exponential backoff
+        async function callGeminiApi(url, payload, retries = 5, delay = 1000) {
+            try {
+                const response = await fetch(`${url}?key=${API_KEY}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (response.status === 429 && retries > 0) {
+                    console.warn(`Rate limit hit. Retrying in ${delay / 1000}s...`);
+                    await new Promise(res => setTimeout(res, delay));
+                    return await callGeminiApi(url, payload, retries - 1, delay * 2);
+                }
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(`API call failed with status ${response.status}: ${JSON.stringify(errorData)}`);
+                }
+
+                return await response.json();
+            } catch (error) {
+                console.error('API call error:', error);
+                throw error;
+            }
+        }
+        
+        // Function to get a single embedding from the model
+        async function getEmbedding(text) {
+            const payload = {
+                "requests": [{
+                    "model": EMBEDDING_MODEL,
+                    "content": {
+                        "parts": [{ "text": text }]
+                    }
+                }]
+            };
+            const embeddingUrl = "https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:batchEmbedContents"
+            
+            try {
+                const result = await callGeminiApi(embeddingUrl, payload);
+                return result.embeddings[0].values;
+            } catch (error) {
+                console.error('Embedding API call failed:', error);
+                throw error;
+            }
+        }
+
+        // Main function to index documents
+        async function indexDocuments(docsToUse) {
+            showMessage('Indexing documents...', 'info');
+            documentStore = [];
+            
+            try {
+                const embeddingPromises = docsToUse.map(doc => getEmbedding(doc));
+                const embeddings = await Promise.all(embeddingPromises);
+
+                for (let i = 0; i < docsToUse.length; i++) {
+                    documentStore.push({
+                        text: docsToUse[i],
+                        embedding: embeddings[i]
+                    });
+                }
+                
+                showMessage(`Successfully indexed ${documentStore.length} document chunks!`, 'success');
+                retrievedContext.innerHTML = '<p class="text-gray-400 italic">Relevant document chunks will appear here after a question is asked.</p>';
+                
+            } catch (error) {
+                showMessage(`Indexing failed: ${error.message}`, 'error');
+                console.error('Indexing failed:', error);
+            }
+        }
+
+        // Listener for Firebase chat history
+        function listenForChatHistory() {
+            if (!isAuthReady) {
+                return;
+            }
+
+            const messagesRef = collection(db, `artifacts/${appId}/users/${userId}/chatHistory`);
+            const q = query(messagesRef, orderBy("timestamp", "desc"));
+            
+            onSnapshot(q, (snapshot) => {
+                messagesContainer.innerHTML = '';
+                if (snapshot.empty) {
+                    displayMessage("Welcome! I'm ready to answer questions based on the pre-loaded documents. Your chat history will be saved here.", "assistant");
+                } else {
+                    snapshot.docs.forEach(doc => {
+                        const messageData = doc.data();
+                        displayMessage(messageData.text, messageData.sender);
+                    });
+                }
+            });
+        }
+        
+        // Clears the chat history
+        async function clearChatHistory() {
+            if (!isAuthReady) {
+                showMessage("Please wait for the app to initialize.", "error");
+                return;
+            }
+            if (confirm("Are you sure you want to clear the chat history? This action is permanent.")) {
+                try {
+                    showMessage("Clearing chat history...", "info");
+                    const messagesRef = collection(db, `artifacts/${appId}/users/${userId}/chatHistory`);
+                    const querySnapshot = await getDocs(messagesRef);
+                    const batch = writeBatch(db);
+                    querySnapshot.forEach((doc) => {
+                        batch.delete(doc.ref);
+                    });
+                    await batch.commit();
+                    showMessage("Chat history cleared!", "success");
+                } catch (e) {
+                    console.error("Error clearing chat history: ", e);
+                    showMessage("Failed to clear chat history.", "error");
+                }
+            }
+        }
+        
+        // Main function to ask a question
+        async function askQuestion() {
+            const question = userInput.value.trim();
+            if (question === '') {
+                return;
+            }
+            
+            if (documentStore.length === 0) {
+                showMessage("Please upload a document or wait for the default documents to load before asking a question.", "error");
+                return;
+            }
+
+            // Get the selected AI model
+            const selectedModel = aiModelSelect.value;
+            const generationUrl = `https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent`;
+
+            // Save user message to chat history
+            if (isAuthReady) {
+                await addDoc(collection(db, `artifacts/${appId}/users/${userId}/chatHistory`), {
+                    text: question,
+                    sender: 'user',
+                    timestamp: new Date()
+                });
+            } else {
+                displayMessage(question, 'user');
+            }
+
+            userInput.value = '';
+
+            const loadingMessage = document.createElement('div');
+            loadingMessage.classList.add('assistant-message', 'loading-dots');
+            loadingMessage.textContent = 'Thinking';
+            messagesContainer.prepend(loadingMessage);
+            
+            // Clear previous context
+            retrievedContext.innerHTML = '<p class="text-gray-400 italic">Relevant document chunks will appear here after a question is asked.</p>';
+
+            try {
+                // Step 1: Get embedding for the user's question
+                const questionEmbedding = await getEmbedding(question);
+
+                // Step 2: Find the most relevant document chunks (Top 5)
+                const similarities = documentStore.map((doc, index) => ({
+                    text: doc.text,
+                    index: index + 1,
+                    similarity: cosineSimilarity(questionEmbedding, doc.embedding)
+                }));
+
+                const relevantChunks = similarities
+                    .filter(s => s.similarity > 0.4) // Set a relevance threshold
+                    .sort((a, b) => b.similarity - a.similarity)
+                    .slice(0, 5); // Get the top 5
+                
+                // If no relevant chunks are found, inform the user
+                if (relevantChunks.length === 0) {
+                    loadingMessage.remove();
+                    const noAnswerMessage = "Sorry, I couldn't find a relevant answer in the documents. Can you try rephrasing or asking about a different topic?";
+                    if (isAuthReady) {
+                        await addDoc(collection(db, `artifacts/${appId}/users/${userId}/chatHistory`), {
+                            text: noAnswerMessage,
+                            sender: 'assistant',
+                            timestamp: new Date()
+                        });
+                    } else {
+                        displayMessage(noAnswerMessage, 'assistant');
+                    }
+                    return;
+                }
+
+                // Display the retrieved chunks
+                displayRetrievedContext(relevantChunks);
+
+                // Step 3: Construct the RAG prompt for the LLM
+                const context = relevantChunks.map(chunk => `[${chunk.index}] ${chunk.text}`).join('\n\n');
+                
+                const ragPrompt = `
+                    You are an internal documentation Q&A assistant. Your goal is to provide a concise, professional, and accurate answer based *only* on the provided context. Do not use any external knowledge. If the answer is not contained in the context, politely and concisely state that you cannot answer based on the provided documents.
+
+                    Please cite the sources by referencing the number at the beginning of each document chunk (e.g., [1], [3]).
+
+                    **Context:**
+                    ${context}
+                    
+                    **Question:**
+                    ${question}
+                    
+                    **Answer:**
+                `;
+                
+                const answerPayload = {
+                    contents: [{
+                        parts: [{ text: ragPrompt }]
+                    }]
+                };
+
+                // Step 4: Get the final answer from the LLM
+                const answerResult = await callGeminiApi(generationUrl, answerPayload);
+                const answer = answerResult.candidates[0].content.parts[0].text;
+                
+                loadingMessage.remove();
+                if (isAuthReady) {
+                    await addDoc(collection(db, `artifacts/${appId}/users/${userId}/chatHistory`), {
+                        text: answer,
+                        sender: 'assistant',
+                        timestamp: new Date()
+                    });
+                } else {
+                    displayMessage(answer, 'assistant');
+                }
+
+            } catch (error) {
+                loadingMessage.remove();
+                showMessage(`An error occurred: ${error.message}`, 'error');
+                console.error('Error during Q&A:', error);
+                const errorMessage = "Sorry, an error occurred while processing your request. Please try again.";
+                if (isAuthReady) {
+                    await addDoc(collection(db, `artifacts/${appId}/users/${userId}/chatHistory`), {
+                        text: errorMessage,
+                        sender: 'assistant',
+                        timestamp: new Date()
+                    });
+                } else {
+                    displayMessage(errorMessage, 'assistant');
+                }
+            }
+        }
+    </script>
+
+</body>
+</html>
