@@ -44,7 +44,7 @@ This project is a single-file web application, so you can run it directly in you
    
    ```
 
-2. Open the `Assistaant.html` file in your preferred web browser.
+2. Open the `Internal Q&A Agent.html` file in your preferred web browser.
 
 **Note:** The application uses the Gemini API. You will need a valid API key to run it. The placeholder in the code should be replaced with your own key.
 
